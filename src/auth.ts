@@ -78,10 +78,19 @@ async function runAuthFlow() {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url!, 'http://localhost:3456');
     const code = url.searchParams.get('code');
+    const error = url.searchParams.get('error');
     if (code) {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end('<h1>Authentication successful! You can close this tab.</h1>');
       serverResolve(code);
+    } else if (error) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(`<h1>Authentication failed: ${error}</h1><p>See terminal for details, then re-run npm run auth.</p>`);
+      console.error(`\nGoogle returned an OAuth error: ${error}`);
+      process.exit(1);
+    } else {
+      res.writeHead(404);
+      res.end();
     }
   });
 
