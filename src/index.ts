@@ -131,7 +131,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'gmail_create_draft',
-      description: 'Create a draft email in Gmail. The draft is saved but NOT sent. Optionally reply to an existing message by passing reply_to_message_id (preserves threading).',
+      description: 'Create a draft email in Gmail. The draft is saved but NOT sent. Optionally reply to an existing message by passing reply_to_message_id (preserves threading). Optionally attach a file by passing attachment_path.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -158,6 +158,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           reply_to_message_id: {
             type: 'string',
             description: 'Optional: the ID of a message to reply to. Sets threadId + In-Reply-To/References headers so the draft threads correctly.',
+          },
+          attachment_path: {
+            type: 'string',
+            description: 'Optional: absolute path to a file to attach to the draft',
           },
         },
         required: ['to', 'body'],
@@ -245,6 +249,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         cc: args?.cc as string | undefined,
         bcc: args?.bcc as string | undefined,
         replyToMessageId: args?.reply_to_message_id as string | undefined,
+        attachmentPath: args?.attachment_path as string | undefined,
       });
       return {
         content: [{ type: 'text', text: `Draft created. Draft ID: ${result.draftId} (message ID: ${result.messageId}, thread ID: ${result.threadId})` }],

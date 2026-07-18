@@ -106,6 +106,13 @@ export async function getThread(threadId: string): Promise<EmailThread> {
   };
 }
 
+function guessMimeType(filename: string): string {
+  return filename.endsWith('.pdf') ? 'application/pdf'
+    : filename.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : filename.endsWith('.doc') ? 'application/msword'
+    : 'application/octet-stream';
+}
+
 function makeRawEmail(params: {
   to: string;
   subject: string;
@@ -117,19 +124,44 @@ function makeRawEmail(params: {
   threadId?: string;
   inReplyTo?: string;
   references?: string;
+  attachmentPath?: string;
 }): string {
-  const lines = [
+  const headers = [
     `To: ${params.to}`,
     `Subject: ${params.subject}`,
-    'Content-Type: text/plain; charset=UTF-8',
     'MIME-Version: 1.0',
   ];
-  if (params.cc) lines.push(`Cc: ${params.cc}`);
-  if (params.bcc) lines.push(`Bcc: ${params.bcc}`);
-  if (params.from) lines.push(`From: ${params.from}`);
-  if (params.inReplyTo) lines.push(`In-Reply-To: ${params.inReplyTo}`);
-  if (params.references) lines.push(`References: ${params.references}`);
-  lines.push('', params.body);
+  if (params.cc) headers.push(`Cc: ${params.cc}`);
+  if (params.bcc) headers.push(`Bcc: ${params.bcc}`);
+  if (params.from) headers.push(`From: ${params.from}`);
+  if (params.inReplyTo) headers.push(`In-Reply-To: ${params.inReplyTo}`);
+  if (params.references) headers.push(`References: ${params.references}`);
+
+  let lines: string[];
+  if (params.attachmentPath) {
+    const boundary = `boundary_${Date.now()}`;
+    const filename = path.basename(params.attachmentPath);
+    const fileBase64 = fs.readFileSync(params.attachmentPath).toString('base64');
+    lines = [
+      ...headers,
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=UTF-8',
+      '',
+      params.body,
+      '',
+      `--${boundary}`,
+      `Content-Type: ${guessMimeType(filename)}; name="${filename}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${filename}"`,
+      '',
+      fileBase64,
+      `--${boundary}--`,
+    ];
+  } else {
+    lines = [...headers, 'Content-Type: text/plain; charset=UTF-8', '', params.body];
+  }
   return Buffer.from(lines.join('\r\n')).toString('base64url');
 }
 
@@ -181,6 +213,7 @@ export async function createDraft(params: {
   cc?: string;
   bcc?: string;
   replyToMessageId?: string;
+  attachmentPath?: string;
 }): Promise<{ draftId: string; messageId: string; threadId: string }> {
   const auth = getAuthenticatedClient();
   const gmail = google.gmail({ version: 'v1', auth });
@@ -218,6 +251,7 @@ export async function createDraft(params: {
     bcc: params.bcc,
     inReplyTo,
     references,
+    attachmentPath: params.attachmentPath,
   });
 
   const res = await gmail.users.drafts.create({
@@ -243,38 +277,7 @@ export async function sendEmailWithAttachment(params: {
   const auth = getAuthenticatedClient();
   const gmail = google.gmail({ version: 'v1', auth });
 
-  const boundary = `boundary_${Date.now()}`;
-  const filename = path.basename(params.attachmentPath);
-  const fileData = fs.readFileSync(params.attachmentPath);
-  const fileBase64 = fileData.toString('base64');
-
-  const mimeType = filename.endsWith('.pdf') ? 'application/pdf'
-    : filename.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    : filename.endsWith('.doc') ? 'application/msword'
-    : 'application/octet-stream';
-
-  const rawLines = [
-    `To: ${params.to}`,
-    `Subject: ${params.subject}`,
-    'MIME-Version: 1.0',
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
-    '',
-    `--${boundary}`,
-    'Content-Type: text/plain; charset=UTF-8',
-    '',
-    params.body,
-    '',
-    `--${boundary}`,
-    `Content-Type: ${mimeType}; name="${filename}"`,
-    'Content-Transfer-Encoding: base64',
-    `Content-Disposition: attachment; filename="${filename}"`,
-    '',
-    fileBase64,
-    `--${boundary}--`,
-  ];
-
-  const raw = Buffer.from(rawLines.join('\r\n')).toString('base64url');
-
+  const raw = makeRawEmail(params);
   const res = await gmail.users.messages.send({
     userId: 'me',
     requestBody: { raw },
