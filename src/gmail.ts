@@ -174,6 +174,66 @@ export async function replyToMessage(params: {
   });
 }
 
+export async function createDraft(params: {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  bcc?: string;
+  replyToMessageId?: string;
+}): Promise<{ draftId: string; messageId: string; threadId: string }> {
+  const auth = getAuthenticatedClient();
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  let threadId: string | undefined;
+  let inReplyTo: string | undefined;
+  let references: string | undefined;
+  let subject = params.subject;
+
+  if (params.replyToMessageId) {
+    const original = await gmail.users.messages.get({
+      userId: 'me',
+      id: params.replyToMessageId,
+      format: 'metadata',
+      metadataHeaders: ['Message-ID', 'References', 'Subject'],
+    });
+    threadId = original.data.threadId ?? undefined;
+    const headers = original.data.payload?.headers ?? [];
+    const msgIdHeader = headers.find((h) => h.name?.toLowerCase() === 'message-id')?.value;
+    const refHeader = headers.find((h) => h.name?.toLowerCase() === 'references')?.value;
+    const origSubject = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value;
+    inReplyTo = msgIdHeader ?? undefined;
+    if (refHeader && msgIdHeader) references = `${refHeader} ${msgIdHeader}`;
+    else if (msgIdHeader) references = msgIdHeader;
+    if (!subject && origSubject) {
+      subject = origSubject.startsWith('Re:') ? origSubject : `Re: ${origSubject}`;
+    }
+  }
+
+  const raw = makeRawEmail({
+    to: params.to,
+    subject,
+    body: params.body,
+    cc: params.cc,
+    bcc: params.bcc,
+    inReplyTo,
+    references,
+  });
+
+  const res = await gmail.users.drafts.create({
+    userId: 'me',
+    requestBody: {
+      message: { raw, threadId },
+    },
+  });
+
+  return {
+    draftId: res.data.id!,
+    messageId: res.data.message?.id ?? '',
+    threadId: res.data.message?.threadId ?? threadId ?? '',
+  };
+}
+
 export async function sendEmailWithAttachment(params: {
   to: string;
   subject: string;

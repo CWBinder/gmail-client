@@ -11,6 +11,7 @@ import {
   sendEmail,
   sendEmailWithAttachment,
   replyToMessage,
+  createDraft,
   getProfile,
 } from './gmail.js';
 
@@ -129,6 +130,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'gmail_create_draft',
+      description: 'Create a draft email in Gmail. The draft is saved but NOT sent. Optionally reply to an existing message by passing reply_to_message_id (preserves threading).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: {
+            type: 'string',
+            description: 'Recipient email address (comma-separated for multiple)',
+          },
+          subject: {
+            type: 'string',
+            description: 'Email subject line. Optional if reply_to_message_id is set (auto-derived as "Re: <original>").',
+          },
+          body: {
+            type: 'string',
+            description: 'Email body (plain text)',
+          },
+          cc: {
+            type: 'string',
+            description: 'CC recipients (comma-separated)',
+          },
+          bcc: {
+            type: 'string',
+            description: 'BCC recipients (comma-separated)',
+          },
+          reply_to_message_id: {
+            type: 'string',
+            description: 'Optional: the ID of a message to reply to. Sets threadId + In-Reply-To/References headers so the draft threads correctly.',
+          },
+        },
+        required: ['to', 'body'],
+      },
+    },
+    {
       name: 'gmail_get_profile',
       description: 'Get the Gmail account profile (email address, message count)',
       inputSchema: {
@@ -199,6 +234,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       });
       return {
         content: [{ type: 'text', text: `Email sent successfully with attachment. Message ID: ${msgId}` }],
+      };
+    }
+
+    if (name === 'gmail_create_draft') {
+      const result = await createDraft({
+        to: args?.to as string,
+        subject: (args?.subject as string) ?? '',
+        body: args?.body as string,
+        cc: args?.cc as string | undefined,
+        bcc: args?.bcc as string | undefined,
+        replyToMessageId: args?.reply_to_message_id as string | undefined,
+      });
+      return {
+        content: [{ type: 'text', text: `Draft created. Draft ID: ${result.draftId} (message ID: ${result.messageId}, thread ID: ${result.threadId})` }],
       };
     }
 
