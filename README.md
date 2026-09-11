@@ -116,6 +116,23 @@ GMAIL_CREDENTIALS_PATH=./personal/credentials.json GMAIL_TOKEN_PATH=./personal/t
 | `gmail_send_message_with_attachment` | Send an email with a file attachment |
 | `gmail_get_profile` | Get account info (email address, message count) |
 
+## Command-line client
+
+`gmail-client/` is a Python CLI over the same credentials, for shells and
+agents that do not speak MCP:
+
+```bash
+uv tool install -e gmail-client
+cp config.example.toml config.toml      # name your account folders
+gmail accounts
+gmail search "is:unread" -n 5
+gmail draft --to x@y.org --subject Hi --body "Text." --attach notes.pdf
+```
+
+Each account is a folder holding `credentials.json` and `token.json`; the
+repo root is one such folder. `SKILL.md` is the agent-facing manual and
+`gmail-client/CONTRACT.md` the full command contract.
+
 ## License
 
 MIT

@@ -1,0 +1,10 @@
+# Copy to config.toml (gitignored). Each account is a folder under this repo
+# holding its own credentials.json and token.json; "." is the repo root.
+# Without a config.toml there is one account, "default", at the root.
+default = "work"
+
+[accounts.work]
+dir = "."
+
+[accounts.personal]
+dir = "personal"

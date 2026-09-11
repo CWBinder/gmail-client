@@ -62,6 +62,16 @@ export function getAuthenticatedClient() {
 
 // Run this standalone to authenticate
 async function runAuthFlow() {
+  console.log(`Credentials: ${CREDENTIALS_PATH}`);
+  console.log(`Token will be saved to: ${TOKEN_PATH}`);
+  if (!process.env.GMAIL_CREDENTIALS_PATH) {
+    console.log(
+      'NOTE: GMAIL_CREDENTIALS_PATH not set — using the root credentials.json. ' +
+      'That OAuth client is internal to quantummotion.tech; for the personal or ' +
+      'oxai inbox, set GMAIL_CREDENTIALS_PATH and GMAIL_TOKEN_PATH to that ' +
+      "account's directory or Google will refuse with 403 org_internal."
+    );
+  }
   const auth = createOAuthClient();
   const authUrl = auth.generateAuthUrl({
     access_type: 'offline',
@@ -92,6 +102,19 @@ async function runAuthFlow() {
       res.writeHead(404);
       res.end();
     }
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        '\nPort 3456 is already in use — a previous auth run is still waiting for a login.\n' +
+        'Any browser tab it opened belongs to that old run (possibly the wrong account!).\n' +
+        'Kill it and retry:  lsof -ti :3456 | xargs kill\n' +
+        'Then sign in only via the browser tab the NEW run opens.'
+      );
+      process.exit(1);
+    }
+    throw err;
   });
 
   server.listen(3456, async () => {

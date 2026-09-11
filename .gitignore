@@ -3,3 +3,8 @@ dist/
 credentials.json
 token.json
 personal/
+config.toml
+*/token.json
+*/credentials.json
+gmail-client/__pycache__/
+**/*.pyc
