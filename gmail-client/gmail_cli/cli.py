@@ -4,6 +4,7 @@ import argparse
 import base64
 import datetime
 import email.utils
+import html
 import json
 import mimetypes
 import os
@@ -240,6 +241,44 @@ def safe_filename(name: str) -> str:
     return Path(name).name or "attachment"
 
 
+def _iso(millis: str | None) -> str:
+    if not millis:
+        return ""
+    return datetime.datetime.fromtimestamp(int(millis) / 1000).astimezone().isoformat(timespec="seconds")
+
+
+def _addresses(header: str) -> list[str]:
+    return [addr for _name, addr in email.utils.getaddresses([header]) if addr] if header else []
+
+
+def _record(msg: dict, account: str, full: bool) -> dict:
+    """The connector contract's message record. `full` includes the decoded
+    body; search results carry Gmail's snippet instead."""
+    payload = msg.get("payload", {})
+    name, sender = email.utils.parseaddr(_header(payload, "From"))
+    return {
+        "id": msg.get("id"),
+        "account": account,
+        "when": _iso(msg.get("internalDate")),
+        "from": sender,
+        "from_name": name,
+        "to": _addresses(_header(payload, "To")),
+        "cc": _addresses(_header(payload, "Cc")),
+        "subject": _header(payload, "Subject"),
+        "text": message_body(payload) if full else html.unescape(msg.get("snippet") or ""),
+        "unread": "UNREAD" in (msg.get("labelIds") or []),
+        "thread": msg.get("threadId"),
+        "attachments": [
+            {"name": p["filename"], "type": p.get("mimeType"), "size": p.get("body", {}).get("size", 0)}
+            for p in iter_attachment_parts(payload)
+        ],
+    }
+
+
+def _emit(obj) -> None:
+    print(json.dumps(obj, ensure_ascii=False, indent=2))
+
+
 def _print_message(msg: dict) -> None:
     payload = msg.get("payload", {})
     for label, value in (
@@ -316,18 +355,60 @@ def _compose(args: argparse.Namespace, token: str) -> tuple[str, str | None]:
 # ---------------------------------------------------------------- commands
 
 
-def command_email_accounts(_args: argparse.Namespace) -> None:
-    ok = True
+def command_email_accounts(args: argparse.Namespace) -> None:
+    ok, rows = True, []
     for account in ACCOUNTS:
         try:
             token = access_token(account)
             profile = api_request(token, "GET", "/profile")
-            print(f"ok: {account:9} {profile.get('emailAddress')} ({profile.get('messagesTotal')} messages)")
+            rows.append({"name": account, "address": profile.get("emailAddress"), "ok": True,
+                         "messages": profile.get("messagesTotal"), "default": account == DEFAULT_ACCOUNT})
         except MailError as err:
             ok = False
-            print(f"failed: {account:9} {err}")
+            rows.append({"name": account, "address": None, "ok": False, "error": str(err), "default": account == DEFAULT_ACCOUNT})
+    if getattr(args, "json", False):
+        _emit(rows)
+    else:
+        for r in rows:
+            print(f"ok: {r['name']:9} {r['address']} ({r['messages']} messages)" if r["ok"] else f"failed: {r['name']:9} {r['error']}")
     if not ok:
         raise SystemExit(1)
+
+
+def command_capabilities(args: argparse.Namespace) -> None:
+    _emit({
+        "connector": "gmail", "version": __version__, "account_flag": "--account",
+        "verbs": ["accounts", "search", "read", "send", "resolve", "capabilities"],
+        "optional": ["draft", "drafts", "draft-show", "draft-send", "draft-delete", "attachments", "trash"],
+        "features": {"threads": True, "subject": True, "attach": True, "drafts": True, "groups": False},
+        "address": "email address; 'Name <addr>' accepted",
+    })
+
+
+def command_resolve(args: argparse.Namespace) -> None:
+    """Mail has no contact store: an address is its own canonical form."""
+    pairs = [(n, a) for n, a in email.utils.getaddresses([args.who]) if a and "@" in a]
+    if not pairs:
+        if args.json:
+            _emit({"ok": False, "reason": "gmail resolves email addresses only; pass one", "candidates": []})
+        else:
+            print("gmail resolves email addresses only; pass one", file=sys.stderr)
+        raise SystemExit(2)
+    rows = [{"address": a, "name": n} for n, a in pairs]
+    if args.json:
+        _emit({"ok": True, "address": rows[0]["address"], "name": rows[0]["name"], "candidates": rows})
+    else:
+        for r in rows:
+            print(f"{r['address']}" + (f"  ({r['name']})" if r["name"] else ""))
+
+
+def _since_query(text: str) -> str:
+    """'24h', '7d', '30m' or a date -> Gmail after: value (epoch seconds)."""
+    units = {"d": 86400, "h": 3600, "m": 60}
+    now = datetime.datetime.now()
+    if text and text[-1] in units and text[:-1].isdigit():
+        return str(int((now - datetime.timedelta(seconds=int(text[:-1]) * units[text[-1]])).timestamp()))
+    return str(int(datetime.datetime.fromisoformat(text).timestamp()))
 
 
 def command_email_search(args: argparse.Namespace) -> None:
@@ -336,8 +417,19 @@ def command_email_search(args: argparse.Namespace) -> None:
         query = {"maxResults": args.max}
         if args.query:
             query["q"] = args.query
+        if getattr(args, "since", None):
+            query["q"] = (query.get("q", "") + " after:" + _since_query(args.since)).strip()
         listing = api_request(token, "GET", "/messages", query=query)
         messages = listing.get("messages", []) or []
+        if getattr(args, "json", False):
+            rows = []
+            for stub in messages:
+                meta = api_request(token, "GET", f"/messages/{stub['id']}", query={
+                    "format": "metadata", "metadataHeaders": ["From", "To", "Cc", "Subject", "Date"],
+                })
+                rows.append(_record(meta, args.account, full=False))
+            _emit(rows)
+            return
         if not messages:
             print("no messages found")
             return
@@ -365,6 +457,9 @@ def command_email_read(args: argparse.Namespace) -> None:
             messages = thread.get("messages", []) or []
         else:
             messages = [message]
+        if getattr(args, "json", False):
+            _emit([_record(m, args.account, full=True) for m in messages])
+            return
         for index, msg in enumerate(messages):
             if len(messages) > 1:
                 print(f"--- message {index + 1}/{len(messages)} ---")
@@ -383,6 +478,9 @@ def command_email_draft(args: argparse.Namespace) -> None:
         if thread_id:
             message["threadId"] = thread_id
         result = api_request(token, "POST", "/drafts", payload={"message": message})
+        if getattr(args, "json", False):
+            _emit({"ok": True, "draft": result.get("id"), "thread": thread_id, "to": _addresses(args.to), "account": args.account})
+            return
         print(f"draft created on '{args.account}': {result.get('id')}")
         print("review and send it from the Gmail drafts folder")
     except MailError as err:
@@ -397,8 +495,14 @@ def command_email_send(args: argparse.Namespace) -> None:
         if thread_id:
             payload["threadId"] = thread_id
         result = api_request(token, "POST", "/messages/send", payload=payload)
+        if getattr(args, "json", False):
+            _emit({"ok": True, "id": result.get("id"), "thread": result.get("threadId"),
+                   "to": _addresses(args.to), "account": args.account})
+            return
         print(f"sent from '{args.account}': message id {result.get('id')}")
     except MailError as err:
+        if getattr(args, "json", False):
+            _emit({"ok": False, "reason": str(err), "account": args.account}); raise SystemExit(1)
         fail(str(err))
 
 
@@ -494,6 +598,7 @@ def command_email_help(args: argparse.Namespace) -> None:
 
 
 def _add_account_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", help="machine-readable output (connector contract)")
     parser.add_argument(
         "--account",
         default=DEFAULT_ACCOUNT,
@@ -533,11 +638,21 @@ Examples:
     email_sub = email_parser.add_subparsers(dest="email_command")
 
     accounts = email_sub.add_parser("accounts", help="list the accounts and check that each authenticates")
+    accounts.add_argument("--json", action="store_true")
     accounts.set_defaults(func=command_email_accounts)
+
+    caps = email_sub.add_parser("capabilities", help="what this connector implements (JSON)")
+    caps.set_defaults(func=command_capabilities)
+
+    resolve = email_sub.add_parser("resolve", help="canonical form of a recipient (an address is its own)")
+    resolve.add_argument("who")
+    _add_account_arg(resolve)
+    resolve.set_defaults(func=command_resolve)
 
     search = email_sub.add_parser("search", help="list messages matching a Gmail query")
     search.add_argument("query", nargs="?", help='Gmail search syntax, e.g. "is:unread from:x@y.org" (omit for most recent)')
     search.add_argument("-n", "--max", type=int, default=10, help="maximum results (default: 10)")
+    search.add_argument("--since", help="24h, 7d, or an ISO date; adds an after: clause")
     _add_account_arg(search)
     search.set_defaults(func=command_email_search)
 

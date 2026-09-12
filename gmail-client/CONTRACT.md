@@ -12,7 +12,7 @@ from the terminal. It talks to the Gmail REST API directly over stdlib
 | `personal` | `<personal-address>`              | `<gmail-dir>/personal/` |
 | `oxai`     | `<committee-address>`             | `<gmail-dir>/oxai/`     |
 
-`<gmail-dir>` is `~/Projects/MCPs/Gmail` (override: `WS_GMAIL_DIR`). Select
+`<gmail-dir>` is `~/Projects/gmail` (override: `WS_GMAIL_DIR`). Select
 per call with `--account`; the default is `qmt` (override: `WS_EMAIL_ACCOUNT`).
 
 ## Credential sharing (single source of truth)
@@ -27,7 +27,7 @@ it. Each account is a `credentials.json` (OAuth client) plus `token.json`
 - No credential material lives in this repository — only the path above.
 - When a refresh token expires or is revoked (`invalid_grant`), re-run the
   MCP auth flow, which rewrites the token file both tools use:
-  `cd ~/Projects/MCPs/Gmail && GMAIL_CREDENTIALS_PATH=<acct>/credentials.json
+  `cd ~/Projects/gmail && GMAIL_CREDENTIALS_PATH=<acct>/credentials.json
   GMAIL_TOKEN_PATH=<acct>/token.json npm run auth`
 
 ### Re-auth pitfalls (both bitten 2026-08-07)
@@ -108,7 +108,7 @@ the body is read from stdin (piping; a bare terminal is refused).
 ## Relationship to the Gmail MCP
 
 Same accounts, same credentials, same API underneath. The MCP server
-(`~/Projects/MCPs/Gmail`, Node) serves interactive Claude sessions in
+(`~/Projects/gmail`, Node) serves interactive Claude sessions in
 `~/Documents`; `gmail` serves the terminal and scripts. The CLI surface
 is a superset of the MCP's: drafts management, attachment download, and
 trash exist only here (the MCP exposes no deletion at all).
