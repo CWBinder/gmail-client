@@ -327,7 +327,15 @@ def _reply_context(token: str, message_id: str) -> dict:
     }
 
 
+def _recipient(args: argparse.Namespace) -> str:
+    to = args.to or getattr(args, "who", None)
+    if not to:
+        fail("a recipient is needed: `gmail send WHO ...` or `--to WHO`", code=2)
+    return to
+
+
 def _compose(args: argparse.Namespace, token: str) -> tuple[str, str | None]:
+    args.to = _recipient(args)
     """Shared draft/send assembly. Returns (raw, thread_id)."""
     body = args.body
     if body is None:
@@ -609,7 +617,8 @@ def _add_account_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_compose_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--to", required=True, help="recipient (comma-separated for multiple)")
+    parser.add_argument("who", nargs="?", help="recipient (the connector contract's positional form)")
+    parser.add_argument("--to", help="recipient (comma-separated for multiple); same as the positional")
     parser.add_argument("--subject", help="subject line (derived as 'Re: ...' when --reply-to is set)")
     parser.add_argument("--body", help="plain-text body (omit to read it from stdin)")
     parser.add_argument("--cc", help="CC recipients (comma-separated)")
