@@ -92,6 +92,8 @@ def access_token(account: str) -> str:
         raise MailError(f"token refresh failed for '{account}': {err.code} {detail}") from err
     except urllib.error.URLError as err:
         raise MailError(f"network error refreshing token: {err.reason}") from err
+    except OSError as err:                       # TLS hiccups surface as bare OSError, not URLError
+        raise MailError(f"network error refreshing token: {err}") from err
     return data["access_token"]
 
 
