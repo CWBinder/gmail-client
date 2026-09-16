@@ -1,4 +1,4 @@
-# gmail-mcp
+# gmail-client
 
 A minimal MCP server for Gmail with full read and write access -- send emails, reply to threads, and attach files. Works with [Claude Code](https://claude.ai/claude-code) and any MCP-compatible client.
 
@@ -35,8 +35,8 @@ You need OAuth credentials so the server can access your Gmail account.
 ### 2. Clone, install, build, and authenticate
 
 ```bash
-git clone https://github.com/CWBinder/gmail-mcp.git
-cd gmail-mcp
+git clone https://github.com/CWBinder/gmail-client.git
+cd gmail-client
 npm install
 npm run build
 ```
@@ -51,7 +51,7 @@ This opens a browser window for Google OAuth consent. Once approved, a `token.js
 
 ### 3. Add the MCP server to Claude Code
 
-Open your Claude Code settings file at `~/.claude/settings.json` and add the server under `mcpServers`. Replace `/path/to/gmail-mcp` with the actual path where you cloned the repo:
+Open your Claude Code settings file at `~/.claude/settings.json` and add the server under `mcpServers`. Replace `/path/to/gmail-client` with the actual path where you cloned the repo:
 
 ```json
 {
@@ -59,8 +59,8 @@ Open your Claude Code settings file at `~/.claude/settings.json` and add the ser
     "gmail": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/gmail-mcp/dist/index.js"],
-      "cwd": "/path/to/gmail-mcp"
+      "args": ["/path/to/gmail-client/dist/index.js"],
+      "cwd": "/path/to/gmail-client"
     }
   }
 }
@@ -93,11 +93,11 @@ GMAIL_CREDENTIALS_PATH=./personal/credentials.json GMAIL_TOKEN_PATH=./personal/t
     "gmail-personal": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/gmail-mcp/dist/index.js"],
-      "cwd": "/path/to/gmail-mcp",
+      "args": ["/path/to/gmail-client/dist/index.js"],
+      "cwd": "/path/to/gmail-client",
       "env": {
-        "GMAIL_CREDENTIALS_PATH": "/path/to/gmail-mcp/personal/credentials.json",
-        "GMAIL_TOKEN_PATH": "/path/to/gmail-mcp/personal/token.json"
+        "GMAIL_CREDENTIALS_PATH": "/path/to/gmail-client/personal/credentials.json",
+        "GMAIL_TOKEN_PATH": "/path/to/gmail-client/personal/token.json"
       }
     }
   }
