@@ -277,6 +277,25 @@ def _record(msg: dict, account: str, full: bool) -> dict:
     }
 
 
+def _thread_record(thread: dict, account: str) -> dict:
+    """The connector contract's summary for one readable message thread."""
+    messages = thread.get("messages") or []
+    records = [_record(message, account, full=False) for message in messages]
+    latest = max(records, key=lambda row: row.get("when") or "", default={})
+    participants = []
+    for row in records:
+        for address in [row.get("from"), *row.get("to", [])]:
+            if address and address != "me" and address not in participants:
+                participants.append(address)
+    return {
+        "id": thread.get("id"), "account": account,
+        "name": latest.get("subject") or "(no subject)", "type": "email",
+        "participants": participants, "when": latest.get("when") or "",
+        "snippet": latest.get("text") or html.unescape(thread.get("snippet") or ""),
+        "message_count": len(messages),
+    }
+
+
 def _emit(obj) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
@@ -388,7 +407,7 @@ def command_email_accounts(args: argparse.Namespace) -> None:
 def command_capabilities(args: argparse.Namespace) -> None:
     _emit({
         "connector": "gmail", "version": __version__, "account_flag": "--account",
-        "verbs": ["accounts", "search", "read", "send", "resolve", "capabilities"],
+        "verbs": ["accounts", "threads", "search", "read", "send", "resolve", "capabilities"],
         "optional": ["draft", "drafts", "draft-show", "draft-send", "draft-delete", "attachments", "trash"],
         "features": {"threads": True, "subject": True, "attach": True, "drafts": True, "groups": False},
         "address": "email address; 'Name <addr>' accepted",
@@ -421,14 +440,73 @@ def _since_query(text: str) -> str:
     return str(int(datetime.datetime.fromisoformat(text).timestamp()))
 
 
-def command_email_search(args: argparse.Namespace) -> None:
+def _search_query(args: argparse.Namespace) -> str:
+    parts = []
+    if args.query:
+        if getattr(args, "native", False):
+            parts.append(args.query)
+        else:
+            literal = args.query.replace("\\", "\\\\").replace('"', '\\"')
+            parts.append(f'"{literal}"')
+    if getattr(args, "sender", None):
+        parts.append(f"from:{args.sender}")
+    if getattr(args, "since", None):
+        parts.append("after:" + _since_query(args.since))
+    return " ".join(parts)
+
+
+def _common_match(row: dict, query: str | None, sender: str | None, since: str | None) -> bool:
+    if query and query.casefold() not in f"{row.get('subject', '')}\n{row.get('text', '')}".casefold():
+        return False
+    if sender and sender.casefold() not in f"{row.get('from', '')} {row.get('from_name', '')}".casefold():
+        return False
+    if since:
+        boundary = datetime.datetime.fromtimestamp(int(_since_query(since))).astimezone().isoformat()
+        if (row.get("when") or "") < boundary:
+            return False
+    return True
+
+
+def command_email_threads(args: argparse.Namespace) -> None:
     try:
         token = access_token(args.account)
         query = {"maxResults": args.max}
-        if args.query:
-            query["q"] = args.query
-        if getattr(args, "since", None):
-            query["q"] = (query.get("q", "") + " after:" + _since_query(args.since)).strip()
+        text = _search_query(args)
+        if text:
+            query["q"] = text
+        listing = api_request(token, "GET", "/threads", query=query)
+        rows = []
+        for stub in listing.get("threads", []) or []:
+            thread = api_request(token, "GET", f"/threads/{stub['id']}", query={"format": "full"})
+            rows.append(_thread_record(thread, args.account))
+        if args.json:
+            _emit(rows); return
+        if not rows:
+            print("no threads found"); return
+        for row in rows:
+            people = ", ".join(row["participants"][:3])
+            print(f"{row['when'][:16]:16}  {row['name'][:50]:50}  {people[:35]:35}  <{row['id']}>")
+    except MailError as err:
+        fail(str(err))
+
+
+def command_email_search(args: argparse.Namespace) -> None:
+    try:
+        token = access_token(args.account)
+        if args.thread_id:
+            thread = api_request(token, "GET", f"/threads/{args.thread_id}", query={"format": "full"})
+            rows = [_record(message, args.account, full=True) for message in thread.get("messages", []) or []]
+            rows = [row for row in rows if _common_match(row, args.query, args.sender, args.since)]
+            rows = sorted(rows, key=lambda row: row.get("when") or "", reverse=True)[:args.max]
+            if args.json:
+                _emit(rows); return
+            for row in rows:
+                print(f"{row['id']}  {row['when'][:16]:16}  {row['from'][:34]:34}  {(row['subject'] or row['text'])[:60]}")
+            return
+        query = {"maxResults": args.max}
+        text = _search_query(args)
+        if text:
+            query["q"] = text
         listing = api_request(token, "GET", "/messages", query=query)
         messages = listing.get("messages", []) or []
         if getattr(args, "json", False):
@@ -461,11 +539,16 @@ def command_email_search(args: argparse.Namespace) -> None:
 def command_email_read(args: argparse.Namespace) -> None:
     try:
         token = access_token(args.account)
-        message = api_request(token, "GET", f"/messages/{args.message_id}", query={"format": "full"})
-        if args.thread:
-            thread = api_request(token, "GET", f"/threads/{message['threadId']}", query={"format": "full"})
+        message_id = args.message_id or args.legacy_id
+        if args.thread_id:
+            thread = api_request(token, "GET", f"/threads/{args.thread_id}", query={"format": "full"})
             messages = thread.get("messages", []) or []
+            if args.max is not None:
+                messages = messages[-args.max:]
         else:
+            if not message_id:
+                fail("say what to read: --message MESSAGE_ID or --thread THREAD_ID", code=2)
+            message = api_request(token, "GET", f"/messages/{message_id}", query={"format": "full"})
             messages = [message]
         if getattr(args, "json", False):
             _emit([_record(m, args.account, full=True) for m in messages])
@@ -638,8 +721,10 @@ def build_parser() -> argparse.ArgumentParser:
 Authenticate with `npm run auth` (GMAIL_CREDENTIALS_PATH/GMAIL_TOKEN_PATH for a subfolder).
 
 Examples:
-  gmail search "is:unread" -n 5
-  gmail read 19f76a1bd98cdf6a --thread
+  gmail search "is:unread" --native -n 5
+  gmail threads "budget" -n 5
+  gmail read --message 19f76a1bd98cdf6a
+  gmail read --thread 19f76a1bd98cdf6a
   gmail draft --to x@y.org --subject Hi --body "Text." --attach notes.pdf
   git diff | gmail send --to me@me.org --subject "Diff" --account personal
 """,
@@ -660,16 +745,30 @@ Examples:
     _add_account_arg(resolve)
     resolve.set_defaults(func=command_resolve)
 
-    search = email_sub.add_parser("search", help="list messages matching a Gmail query")
-    search.add_argument("query", nargs="?", help='Gmail search syntax, e.g. "is:unread from:x@y.org" (omit for most recent)')
+    search = email_sub.add_parser("search", help="list messages matching visible text or an explicit native query")
+    search.add_argument("query", nargs="?", help="visible text; add --native for Gmail search syntax")
     search.add_argument("-n", "--max", type=int, default=10, help="maximum results (default: 10)")
     search.add_argument("--since", help="24h, 7d, or an ISO date; adds an after: clause")
+    search.add_argument("--thread", dest="thread_id", help="restrict to one thread id")
+    search.add_argument("--from", dest="sender", help="restrict to one sender")
+    search.add_argument("--native", action="store_true", help="query uses Gmail's native syntax (accepted for compatibility)")
     _add_account_arg(search)
     search.set_defaults(func=command_email_search)
 
-    read = email_sub.add_parser("read", help="print one message (or its whole thread)")
-    read.add_argument("message_id", help="message id from `gmail search`")
-    read.add_argument("--thread", action="store_true", help="print the entire conversation")
+    threads = email_sub.add_parser("threads", help="find readable email threads")
+    threads.add_argument("query", nargs="?", help="visible text used to discover a thread")
+    threads.add_argument("--from", dest="sender", help="restrict to one sender")
+    threads.add_argument("--since", help="24h, 7d, or an ISO date")
+    threads.add_argument("-n", "--max", type=int, default=10)
+    _add_account_arg(threads)
+    threads.set_defaults(func=command_email_threads)
+
+    read = email_sub.add_parser("read", help="read one message or one complete thread")
+    read.add_argument("legacy_id", nargs="?", help="legacy shorthand for --message MESSAGE_ID")
+    choice = read.add_mutually_exclusive_group()
+    choice.add_argument("--message", dest="message_id", help="message id from search")
+    choice.add_argument("--thread", dest="thread_id", help="thread id from search or threads")
+    read.add_argument("-n", "--max", type=int, help="newest messages to read; omitted means the complete thread")
     _add_account_arg(read)
     read.set_defaults(func=command_email_read)
 

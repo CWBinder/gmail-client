@@ -125,7 +125,10 @@ agents that do not speak MCP:
 uv tool install -e gmail-client
 cp config.example.toml config.toml      # name your account folders
 gmail accounts
-gmail search "is:unread" -n 5
+gmail threads "budget" -n 5
+gmail search "is:unread" --native -n 5
+gmail read --message MESSAGE_ID
+gmail read --thread THREAD_ID
 gmail draft --to x@y.org --subject Hi --body "Text." --attach notes.pdf
 ```
 

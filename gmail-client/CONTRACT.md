@@ -64,8 +64,10 @@ against the Gmail API.
 
 ```text
 gmail accounts
-gmail search [QUERY] [-n N]
-gmail read ID [--thread]
+gmail threads [QUERY] [--from ADDRESS] [--since TIME] [-n N]
+gmail search [QUERY] [--thread ID] [--from ADDRESS] [--since TIME] [--native] [-n N]
+gmail read --message MESSAGE-ID
+gmail read --thread THREAD-ID [-n N]
 gmail attachments ID [--save DIR] [--force]
 gmail drafts create --to ... [...]
 gmail drafts list [-n N]
@@ -75,6 +77,13 @@ gmail drafts delete DRAFT-ID
 gmail send --to ... [...]
 gmail trash ID
 ```
+
+Every search result has a self-contained message `id` and a `thread` id.
+`read --message` retrieves exactly one message; `read --thread` retrieves the
+complete email chain directly unless `-n` explicitly limits it. `threads`
+returns independently readable thread summaries.
+A bare search term searches Gmail-visible content. `--native` documents that
+the query intentionally uses Gmail operators such as `is:unread` or `from:`.
 
 The draft-first workflow is closed end to end: `drafts create` composes,
 `drafts list`/`show` review, `drafts send` releases -- nothing has to touch

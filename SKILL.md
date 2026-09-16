@@ -11,8 +11,12 @@ used. Name the account in every report.
 
 ```bash
 gmail accounts                                   # first; a failed line names the account to re-authenticate
-gmail search "is:unread" -n 20 --account NAME    # Gmail query syntax; quote it
-gmail read ID [--thread] --account NAME
+gmail threads [QUERY] [-n 20] --account NAME     # find independently readable email chains
+gmail search TEXT [-n 20] --account NAME         # literal visible-content search
+gmail search "is:unread" --native --account NAME # opt in to Gmail query syntax
+gmail search TEXT --thread ID --from ADDRESS --account NAME
+gmail read --message ID --account NAME
+gmail read --thread ID [-n 20] --account NAME
 gmail attachments ID [--save DIR] [--force] --account NAME
 gmail draft --to X [--subject S] [--body B] [--reply-to ID] [--attach FILE] --account NAME
 gmail drafts [-n 10] | draft-show DRAFT_ID
